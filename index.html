@@ -530,27 +530,52 @@ const VERSES = {
 };
 
 // ═══════════════════════════════════════════════
-//  RANKING
+//  RANKING — Firebase Realtime Database
+//  Compartilhado entre todos os jogadores
 // ═══════════════════════════════════════════════
-function rankKey(book){ return 'em_rank_' + book; }
+const FB_URL = 'https://bom-de-biblia-7aedb-default-rtdb.firebaseio.com';
+let _rankCache = { daniel: [], apocalipse: [] };
 
-function loadRanking(book){
-  try{ return JSON.parse(localStorage.getItem(rankKey(book))||'[]') }
-  catch(e){ return [] }
+async function loadRanking(book) {
+  try {
+    const res = await fetch(`${FB_URL}/rankings/${book}.json`);
+    if (!res.ok) return _rankCache[book];
+    const data = await res.json();
+    if (data && Array.isArray(data)) {
+      _rankCache[book] = data;
+    } else {
+      _rankCache[book] = [];
+    }
+    return _rankCache[book];
+  } catch(e) {
+    return _rankCache[book];
+  }
 }
-function saveRanking(book, r){ localStorage.setItem(rankKey(book), JSON.stringify(r)); }
 
-function addToRanking(book, name, score, pct){
-  let r = loadRanking(book);
-  r.push({name, score, pct, date: new Date().toLocaleDateString('pt-BR')});
-  r.sort((a,b)=>b.score-a.score);
-  r = r.slice(0,3);
-  saveRanking(book, r);
+async function saveRanking(book, r) {
+  try {
+    await fetch(`${FB_URL}/rankings/${book}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(r)
+    });
+    _rankCache[book] = r;
+  } catch(e) {}
+}
+
+async function addToRanking(book, name, score, pct) {
+  let r = await loadRanking(book);
+  // Mantém apenas a melhor pontuação por jogador
+  r = r.filter(e => e.name.toLowerCase() !== name.toLowerCase());
+  r.push({ name, score, pct, date: new Date().toLocaleDateString('pt-BR') });
+  r.sort((a,b) => b.score - a.score);
+  r = r.slice(0, 3);
+  await saveRanking(book, r);
   return r;
 }
 
-function renderRankSmall(book, elId){
-  const r = loadRanking(book);
+async function renderRankSmall(book, elId){
+  const r = await loadRanking(book);
   const el = document.getElementById(elId);
   if(!el) return;
   if(!r.length){
@@ -571,8 +596,8 @@ function renderRankSmall(book, elId){
   }).join('') + '</div>';
 }
 
-function renderRankResult(book, currentName, currentScore){
-  const r = loadRanking(book);
+async function renderRankResult(book, currentName, currentScore){
+  const r = await loadRanking(book);
   const el = document.getElementById('rank-res-list');
   el.innerHTML = [0,1,2].map(i=>{
     if(!r[i]) return `<div class="pi-big r${i+1} empty-slot">
@@ -595,7 +620,7 @@ function renderRankResult(book, currentName, currentScore){
   }).join('');
 }
 
-function refreshHomeRankings(){
+async function refreshHomeRankings(){
   renderRankSmall('daniel','rank-home-daniel');
   renderRankSmall('apocalipse','rank-home-apoc');
 }
@@ -630,8 +655,8 @@ function replayGame(){
   selectBook(currentBook);
 }
 
-document.addEventListener('DOMContentLoaded', ()=>{
-  refreshHomeRankings();
+document.addEventListener('DOMContentLoaded', async ()=>{
+  await refreshHomeRankings();
   document.getElementById('pname').addEventListener('keydown', e=>{
     if(e.key==='Enter') confirmName();
   });
@@ -798,14 +823,14 @@ function addNext(){
   btn.id='bnext'; btn.className='btn btn-g';
   const tq=window.TOTAL_Q_DYN||TOTAL_Q;
   btn.innerHTML=idx===tq-1?'🏁 Ver Resultado':'Próxima →';
-  btn.onclick=()=>{idx++; (idx>=tq)?results():render();};
+  btn.onclick=()=>{idx++; (idx>=tq)?results().catch(console.error):render();};
   nav.appendChild(btn);
 }
 
 // ═══════════════════════════════════════════════
 //  RESULTS
 // ═══════════════════════════════════════════════
-function results(){
+async function results(){
   const pct=Math.round((score/MAX_SCORE)*100);
   document.getElementById('rscore').textContent=score;
   document.getElementById('rsub').textContent='pontos de '+MAX_SCORE;
@@ -826,8 +851,8 @@ function results(){
   const verses = VERSES[currentBook];
   document.getElementById('rverse').textContent=verses[Math.floor(Math.random()*verses.length)];
 
-  addToRanking(currentBook, playerName, score, pct);
-  renderRankResult(currentBook, playerName, score);
+  await addToRanking(currentBook, playerName, score, pct);
+  await renderRankResult(currentBook, playerName, score);
   refreshHomeRankings();
   show('s-res');
 }
